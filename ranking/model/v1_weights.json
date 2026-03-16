@@ -1,0 +1,22 @@
+{
+  "version": "v1",
+  "feature_names": [
+    "f_breaking",
+    "f_political",
+    "f_economic",
+    "f_international",
+    "f_low_category",
+    "f_body_length",
+    "f_keyword_count"
+  ],
+  "weights": [
+    0.0,
+    0.0,
+    0.037411940480426266,
+    0.5737996580494085,
+    -5.748742354206505,
+    0.26622366712609596,
+    1.7116427822592615
+  ],
+  "bias": -0.16493495395270555
+}
