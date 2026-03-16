@@ -3,8 +3,9 @@
 - [ ] 1.1 建立 webhook ingestion endpoint（驗簽、冪等、2 秒內 ACK）
 - [ ] 1.2 建立非 webhook 來源 bridge（輪詢轉事件）
 - [ ] 1.3 建立事件標準化 schema（topic/region/lang/credibility/timestamp）
-- [ ] 1.4 建立 CNA list adapter（no-bs4）輸出 `title/url/dt` 並正規化 `publishedAt`
+- [ ] 1.4 建立 CNA sitemap adapter（XML）輸出 `title/url/publishedAt`（主路徑，no-bs4）
 - [ ] 1.5 建立 CNA article adapter（ProjNews）補齊 pid 內容並生成 `eventId/dedupKey`
+- [ ] 1.6 建立 CNA list fallback adapter（WNewsList/HTML）作為 sitemap 異常降級路徑
 
 ## 2. Ranking（選稿排序）
 
