@@ -164,7 +164,7 @@ class TestFeatures:
             body_length=200,
         )
         feat = extract_features(s)
-        assert feat[4] == 1.0  # f_low_category
+        assert feat[8] == 1.0  # f_low_category (index 8 in v1.1)
 
     def test_body_length_log(self) -> None:
         s = TrainingSample(
@@ -173,7 +173,7 @@ class TestFeatures:
             body_length=1000,
         )
         feat = extract_features(s)
-        assert abs(feat[5] - math.log1p(1000)) < 0.001
+        assert abs(feat[9] - math.log1p(1000)) < 0.001  # f_body_length (index 9 in v1.1)
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ class TestV1Model:
     def test_train_runs(self) -> None:
         samples = self._make_samples()
         model = train(samples, epochs=50)
-        assert len(model.weights) == 7
+        assert len(model.weights) == 11  # v1.1: 11 features
 
     def test_predict_positive_higher(self) -> None:
         samples = self._make_samples()
@@ -211,7 +211,7 @@ class TestV1Model:
         assert scores["p1"] > scores["n1"]
 
     def test_model_serialization(self) -> None:
-        model = LogisticModel(weights=[0.1] * 7, bias=0.5)
+        model = LogisticModel(weights=[0.1] * 11, bias=0.5)
         d = model.to_dict()
         m2 = LogisticModel.from_dict(d)
         assert m2.weights == model.weights

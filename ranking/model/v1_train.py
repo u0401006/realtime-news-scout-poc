@@ -50,22 +50,51 @@ from training_data.schema import Label, TrainingSample  # noqa: E402
 BREAKING_KW = {
     "爆炸", "傷亡", "地震", "颱風", "海嘯", "墜機",
     "槍擊", "恐攻", "核災", "疫情", "封城", "戒嚴",
+    "火警", "衝突", "落石", "骨折", "開槍", "追捕",
+    "事故", "罹難", "搜救", "直升機",
 }
 POLITICAL_KW = {
     "總統", "行政院", "立法院", "監察院", "司法院",
     "選舉", "罷免", "彈劾", "修憲", "公投",
-    "國防", "外交", "兩岸",
+    "國防", "外交", "兩岸", "內政部", "財政部",
+    "卓榮泰", "管碧玲", "國土安全",
 }
 ECONOMIC_KW = {
     "半導體", "台積電", "AI", "人工智慧",
     "股市", "央行", "利率", "通膨", "GDP",
-    "貿易", "關稅", "制裁",
+    "貿易", "關稅", "制裁", "薪資", "營收",
+    "增資", "量產",
 }
 INTERNATIONAL_KW = {
-    "中國", "美國", "日本", "歐盟", "北約",
-    "聯合國", "G7", "G20", "APEC",
-    "俄羅斯", "烏克蘭", "以色列",
+    "以色列", "真主黨", "伊朗", "烏克蘭", "俄羅斯",
+    "北約", "聯合國", "G7", "G20", "APEC",
 }
+
+# 新增：IP / 知名品牌 / 高知名度企業
+IP_KW = {
+    "台積電", "鴻海", "中華電", "聯發科", "NVIDIA",
+    "Apple", "Google", "Tesla", "TSMC",
+    "騰輝", "永豐餘", "寶可夢",
+    "GTC", "人形機器人", "AI伺服器",
+}
+
+# 新增：新奇性關鍵字
+NOVELTY_KW = {
+    "首次", "首度", "創紀錄", "突破", "新種", "命名",
+    "史上", "最高", "最大", "翻倍", "里程碑",
+}
+
+# 新增：高關注賽事
+SPORTS_KW = {
+    "奧運", "世足", "WBC", "MLB", "NBA", "世界盃",
+    "亞運", "大聯盟", "冬奧", "國訓中心",
+}
+
+# 泛國際 — 這些關鍵字單獨命中但無其他正向特徵時應被過濾
+GENERIC_INTL_KW = {
+    "中國", "美國", "日本", "歐盟",
+}
+
 LOW_PRIORITY_CAT = {"entertainment", "sport", "lifestyle"}
 
 FEATURE_NAMES = [
@@ -73,6 +102,10 @@ FEATURE_NAMES = [
     "f_political",
     "f_economic",
     "f_international",
+    "f_ip",
+    "f_novelty",
+    "f_sports",
+    "f_generic_intl_only",
     "f_low_category",
     "f_body_length",
     "f_keyword_count",
@@ -85,15 +118,35 @@ def _has_keyword_hit(title: str, keywords: set[str]) -> bool:
 
 
 def extract_features(sample: TrainingSample) -> list[float]:
-    """抽取特徵向量。"""
+    """抽取特徵向量（v1.1 — 含新奇、IP、賽事、泛國際負向）。"""
     title = sample.title
     cats = {k.lower() for k in sample.keywords}
 
+    hit_breaking = _has_keyword_hit(title, BREAKING_KW)
+    hit_political = _has_keyword_hit(title, POLITICAL_KW)
+    hit_economic = _has_keyword_hit(title, ECONOMIC_KW)
+    hit_international = _has_keyword_hit(title, INTERNATIONAL_KW)
+    hit_ip = _has_keyword_hit(title, IP_KW)
+    hit_novelty = _has_keyword_hit(title, NOVELTY_KW)
+    hit_sports = _has_keyword_hit(title, SPORTS_KW)
+
+    # 泛國際：命中 GENERIC_INTL_KW 但未命中任何正向特徵
+    hit_generic_intl = _has_keyword_hit(title, GENERIC_INTL_KW)
+    any_positive = any([
+        hit_breaking, hit_political, hit_economic,
+        hit_international, hit_ip, hit_novelty, hit_sports,
+    ])
+    generic_intl_only = hit_generic_intl and not any_positive
+
     return [
-        1.0 if _has_keyword_hit(title, BREAKING_KW) else 0.0,
-        1.0 if _has_keyword_hit(title, POLITICAL_KW) else 0.0,
-        1.0 if _has_keyword_hit(title, ECONOMIC_KW) else 0.0,
-        1.0 if _has_keyword_hit(title, INTERNATIONAL_KW) else 0.0,
+        1.0 if hit_breaking else 0.0,
+        1.0 if hit_political else 0.0,
+        1.0 if hit_economic else 0.0,
+        1.0 if hit_international else 0.0,
+        1.0 if hit_ip else 0.0,
+        1.0 if hit_novelty else 0.0,
+        1.0 if hit_sports else 0.0,
+        1.0 if generic_intl_only else 0.0,   # 負向特徵
         1.0 if (cats and cats.issubset(LOW_PRIORITY_CAT)) else 0.0,
         math.log1p(sample.body_length),  # log-normalized
         float(len(sample.keywords)),

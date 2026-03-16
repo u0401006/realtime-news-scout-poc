@@ -4,24 +4,32 @@
 取代原先的純關鍵字匹配邏輯。每個 check-point 回傳獨立判定與理由，
 最終由 evaluate() 綜合所有 check-point 結果做出選稿決策。
 
+v1.1 更新（2026-03-16）：
+  - 新增 cp-ip（IP / 知名品牌）、cp-novelty（新奇性）、cp-sports（高關注賽事）
+  - 新增 cp-generic-intl（泛國際負向：僅含中國/美國等但無實質新聞價值）
+  - 門檻提高至 55 以過濾泛國際匹配
+
 ## 計分公式（score: 0–100）
 
     score = clamp(BASE + Σ(triggered check-point weights), 0, 100)
 
-    BASE = 50（中性基線，代表「資訊不足以明確判斷」）
+    BASE = 50（中性基線）
 
     正向 check-points（signal="select"）：
       cp-breaking       +30   突發 / 重大事件
       cp-political      +25   政治顯著性
       cp-economic        +20   經濟影響力
-      cp-international  +15   國際關注度
+      cp-international  +15   國際關注度（精準：真主黨、伊朗等）
+      cp-ip             +20   IP / 知名品牌
+      cp-novelty        +15   新奇性
+      cp-sports         +10   高關注賽事
 
     負向 check-points（signal="skip"）：
       cp-category       −25   低優先類別
       cp-completeness   −30   內容缺失 / 過短
+      cp-generic-intl   −15   泛國際匹配（僅含中國/美國等通用字）
 
-    門檻：score >= 50 → selected=True；< 50 → selected=False
-    （若所有 check-points 皆 neutral，score=50，走 fallback 選入）
+    門檻：score >= 55 → selected=True；< 55 → selected=False
 
 設計原則：
 - 每筆輸出的 reason 必須對應具體 check-point 名稱與判斷依據。
@@ -42,7 +50,7 @@ from ingestion.adapters.cna_sitemap import SitemapEntry
 # ---------------------------------------------------------------------------
 
 BASE_SCORE: int = 50
-SELECT_THRESHOLD: int = 50  # >= 此值選入
+SELECT_THRESHOLD: int = 55  # >= 此值選入（v1.1: 從 50 提高至 55 過濾泛國際）
 
 # check-point 權重（正=加分，負=扣分）
 CP_WEIGHTS: dict[str, int] = {
@@ -50,8 +58,12 @@ CP_WEIGHTS: dict[str, int] = {
     "cp-political": 25,
     "cp-economic": 20,
     "cp-international": 15,
+    "cp-ip": 20,
+    "cp-novelty": 15,
+    "cp-sports": 10,
     "cp-category": -25,
     "cp-completeness": -30,
+    "cp-generic-intl": -15,
 }
 
 
@@ -89,27 +101,55 @@ class HeadlineVerdict:
 BREAKING_KEYWORDS: list[str] = [
     "爆炸", "傷亡", "地震", "颱風", "海嘯", "墜機",
     "槍擊", "恐攻", "核災", "疫情", "封城", "戒嚴",
+    "火警", "衝突", "落石", "骨折", "開槍", "追捕",
+    "事故", "罹難", "搜救", "直升機",
 ]
 
 # CP-2: 政治顯著性
 POLITICAL_KEYWORDS: list[str] = [
     "總統", "行政院", "立法院", "監察院", "司法院",
     "選舉", "罷免", "彈劾", "修憲", "公投",
-    "國防", "外交", "兩岸",
+    "國防", "外交", "兩岸", "內政部", "財政部",
+    "卓榮泰", "管碧玲", "國土安全",
 ]
 
 # CP-3: 經濟影響力
 ECONOMIC_KEYWORDS: list[str] = [
     "半導體", "台積電", "AI", "人工智慧",
     "股市", "央行", "利率", "通膨", "GDP",
-    "貿易", "關稅", "制裁",
+    "貿易", "關稅", "制裁", "薪資", "營收",
+    "增資", "量產",
 ]
 
-# CP-4: 國際關注度
+# CP-4: 國際關注度（精準：具衝突 / 重大外交意涵）
 INTERNATIONAL_KEYWORDS: list[str] = [
-    "中國", "美國", "日本", "歐盟", "北約",
-    "聯合國", "G7", "G20", "APEC",
-    "俄羅斯", "烏克蘭", "以色列",
+    "以色列", "真主黨", "伊朗", "烏克蘭", "俄羅斯",
+    "北約", "聯合國", "G7", "G20", "APEC",
+]
+
+# CP-7: IP / 知名品牌（高知名度企業 & 文化 IP）
+IP_KEYWORDS: list[str] = [
+    "台積電", "鴻海", "中華電", "聯發科", "NVIDIA",
+    "Apple", "Google", "Tesla", "TSMC",
+    "騰輝", "永豐餘", "寶可夢",
+    "GTC", "人形機器人", "AI伺服器",
+]
+
+# CP-8: 新奇性
+NOVELTY_KEYWORDS: list[str] = [
+    "首次", "首度", "創紀錄", "突破", "新種", "命名",
+    "史上", "最高", "最大", "翻倍", "里程碑",
+]
+
+# CP-9: 高關注賽事
+SPORTS_KEYWORDS: list[str] = [
+    "奧運", "世足", "WBC", "MLB", "NBA", "世界盃",
+    "亞運", "大聯盟", "冬奧",
+]
+
+# CP-10: 泛國際匹配（僅含通用國名但無實質新聞價值）
+GENERIC_INTL_KEYWORDS: list[str] = [
+    "中國", "美國", "日本", "歐盟",
 ]
 
 # CP-5: 低優先類別（sitemap keywords）
@@ -270,6 +310,90 @@ def cp_content_completeness(
     )
 
 
+def cp_ip_brand(
+    entry: SitemapEntry,
+    body: Optional[str],
+) -> CheckPointResult:
+    """CP-7: IP / 知名品牌。"""
+    hit = _check_keywords_in_text(IP_KEYWORDS, entry.title, body)
+    if hit:
+        return CheckPointResult(
+            name="cp-ip",
+            triggered=True,
+            signal="select",
+            detail=f"IP/知名品牌：{hit}",
+            weight=CP_WEIGHTS["cp-ip"],
+        )
+    return CheckPointResult(
+        name="cp-ip", triggered=False, signal="neutral",
+        detail="未觸發 IP/品牌指標",
+    )
+
+
+def cp_novelty(
+    entry: SitemapEntry,
+    body: Optional[str],
+) -> CheckPointResult:
+    """CP-8: 新奇性。"""
+    hit = _check_keywords_in_text(NOVELTY_KEYWORDS, entry.title, body)
+    if hit:
+        return CheckPointResult(
+            name="cp-novelty",
+            triggered=True,
+            signal="select",
+            detail=f"新奇性：{hit}",
+            weight=CP_WEIGHTS["cp-novelty"],
+        )
+    return CheckPointResult(
+        name="cp-novelty", triggered=False, signal="neutral",
+        detail="未觸發新奇性指標",
+    )
+
+
+def cp_sports_event(
+    entry: SitemapEntry,
+    body: Optional[str],
+) -> CheckPointResult:
+    """CP-9: 高關注賽事。"""
+    hit = _check_keywords_in_text(SPORTS_KEYWORDS, entry.title, body)
+    if hit:
+        return CheckPointResult(
+            name="cp-sports",
+            triggered=True,
+            signal="select",
+            detail=f"高關注賽事：{hit}",
+            weight=CP_WEIGHTS["cp-sports"],
+        )
+    return CheckPointResult(
+        name="cp-sports", triggered=False, signal="neutral",
+        detail="未觸發賽事指標",
+    )
+
+
+def cp_generic_international(
+    entry: SitemapEntry,
+    body: Optional[str],
+) -> CheckPointResult:
+    """CP-10: 泛國際匹配（負向）。
+
+    僅當標題含「中國/美國/日本/歐盟」但未觸發任何其他正向 check-point 時扣分。
+    此 check-point 在 evaluate() 中特殊處理。
+    """
+    hit = _check_keywords_in_text(GENERIC_INTL_KEYWORDS, entry.title, None)
+    if hit:
+        return CheckPointResult(
+            name="cp-generic-intl",
+            triggered=True,
+            signal="skip",
+            detail=f"泛國際匹配：{hit}",
+            weight=CP_WEIGHTS["cp-generic-intl"],
+        )
+    return CheckPointResult(
+        name="cp-generic-intl", triggered=False, signal="neutral",
+        detail="未觸發泛國際匹配",
+    )
+
+
 # ---------------------------------------------------------------------------
 # 所有 check-point 函式（按執行順序）
 # ---------------------------------------------------------------------------
@@ -279,8 +403,12 @@ ALL_CHECKPOINTS = [
     cp_political_significance,
     cp_economic_impact,
     cp_international_relevance,
+    cp_ip_brand,
+    cp_novelty,
+    cp_sports_event,
     cp_category_priority,
     cp_content_completeness,
+    cp_generic_international,  # 必須放最後，因為需要參考其他正向結果
 ]
 
 
@@ -301,6 +429,17 @@ def evaluate(
     for cp_fn in ALL_CHECKPOINTS:
         result = cp_fn(entry, body)
         results.append(result)
+
+    # 泛國際特殊邏輯：若有其他正向 check-point 觸發，取消泛國際扣分
+    has_positive_signal = any(
+        r.triggered and r.signal == "select"
+        for r in results
+    )
+    for r in results:
+        if r.name == "cp-generic-intl" and r.triggered and has_positive_signal:
+            r.triggered = False
+            r.weight = 0
+            r.detail = "泛國際匹配已被正向信號抵銷"
 
     # 計算分數
     delta = sum(r.weight for r in results if r.triggered)

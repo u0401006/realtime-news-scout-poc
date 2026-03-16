@@ -1,0 +1,31 @@
+## 2026-03-14 正樣本
+- https://www.cna.com.tw/news/ahel/202603140078.aspx (台鐵遺失物)
+- https://www.cna.com.tw/news/aspt/202603140101.aspx (拔河摘金)
+- https://www.cna.com.tw/news/aspt/202603140120.aspx (台南亞太球場)
+- https://www.cna.com.tw/news/aipl/202603140027.aspx (中共施壓)
+- https://www.cna.com.tw/news/aopl/202603140010.aspx (美伊戰爭分析)
+- https://www.cna.com.tw/news/aspt/202603140026.aspx (WBC南韓)
+- https://www.cna.com.tw/news/aspt/202603140138.aspx (女足抗中)
+- https://www.cna.com.tw/news/aopl/202603140128.aspx (捷克轉型)
+- https://www.cna.com.tw/news/aspt/202603140147.aspx (拔河4連霸)
+- https://www.cna.com.tw/news/aipl/202603140184.aspx (總統中東局勢)
+- https://www.cna.com.tw/news/amov/202603140183.aspx (黃金梅利號高雄)
+
+## 2026-03-15 正樣本
+- https://www.cna.com.tw/news/aspt/202603150029.aspx (大谷同場開轟)
+- https://www.cna.com.tw/news/aspt/202603150077.aspx (日隊止步8強)
+- https://www.cna.com.tw/news/aspt/202603150111.aspx (大谷不甘心)
+- https://www.cna.com.tw/news/aspt/202603150170.aspx (拔河摘金540kg)
+- https://www.cna.com.tw/news/ahel/202603150165.aspx (宜蘭5.4地震)
+- https://www.cna.com.tw/news/aspt/202603150177.aspx (拔河世錦賽9金)
+
+## 2026-03-16 正樣本
+- https://www.cna.com.tw/news/amov/202603160030.aspx (獵魔女團奧斯卡)
+- https://www.cna.com.tw/news/aopl/202603160027.aspx (川普施壓荷莫茲)
+- https://www.cna.com.tw/news/amov/202603160051.aspx (Golden奧斯卡歌曲)
+- https://www.cna.com.tw/news/amov/202603160062.aspx (奧斯卡帝后)
+- https://www.cna.com.tw/news/aspt/202603160067.aspx (美國WBC晉級)
+- https://www.cna.com.tw/news/aipl/202603160124.aspx (MQ-9B交運)
+- https://www.cna.com.tw/news/aopl/202603160129.aspx (川普陷8難關)
+- https://www.cna.com.tw/news/aipl/202603160079.aspx (李貞秀質詢)
+- https://www.cna.com.tw/news/amov/202603160165.aspx (首位女最佳攝影)
