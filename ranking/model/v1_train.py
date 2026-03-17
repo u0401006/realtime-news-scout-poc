@@ -41,7 +41,11 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from training_data.schema import Label, TrainingSample  # noqa: E402
+# from training_data.schema import Label, TrainingSample  # noqa: E402
+class Label:
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    UNLABELED = "unlabeled"
 
 # ---------------------------------------------------------------------------
 # 特徵抽取（與 headline_selection check-points 對齊）
@@ -307,7 +311,7 @@ def predict_all(
             title=s.title,
             score=round(score, 4),
             reason=reason,
-            original_label=s.label.value,
+            original_label=str(s.label),
         ))
     results.sort(key=lambda r: r.score, reverse=True)
     return results
@@ -317,15 +321,25 @@ def predict_all(
 # CLI
 # ---------------------------------------------------------------------------
 
-def load_samples(path: Path) -> list[TrainingSample]:
-    """從 JSONL 載入 TrainingSample。"""
-    samples: list[TrainingSample] = []
+def load_samples(path: Path) -> list[dict]:
+    """從 JSONL 載入 TrainingSample（Mock 版本，不依賴 Pydantic）。"""
+    samples: list[dict] = []
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
-            samples.append(TrainingSample.model_validate_json(line))
+            data = json.loads(line)
+            # 將 dict 包裝成類似 TrainingSample 的對象
+            class SimpleSample:
+                def __init__(self, d):
+                    self.pid = d["pid"]
+                    self.url = d["url"]
+                    self.title = d["title"]
+                    self.keywords = d.get("keywords", [])
+                    self.body_length = d.get("body_length", 0)
+                    self.label = d["label"]
+            samples.append(SimpleSample(data))
     return samples
 
 
