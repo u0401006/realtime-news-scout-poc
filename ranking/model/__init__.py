@@ -1,1 +1,1 @@
-"""Ranking model sub-package."""
+# ranking.model package

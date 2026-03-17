@@ -1,28 +1,12 @@
-{"pid": "202603160209", "title": "竹園變電所火警　台積電：供電正常、不預期產生影響", "score": 1.0, "reason": "top features: f_breaking=+4.97, f_ip=+4.87, f_economic=+3.36", "original_label": "positive"}
-{"pid": "202603160206", "title": "鴻海GTC秀人形機器人　在美建最大AI伺服器產能", "score": 0.9992, "reason": "top features: f_ip=+4.87, f_economic=+3.36, f_body_length=-1.97", "original_label": "positive"}
-{"pid": "202603160229", "title": "中華電參與智慧城市展　秀AI多元場域應用", "score": 0.9979, "reason": "top features: f_ip=+4.87, f_economic=+3.36, f_body_length=-1.89", "original_label": "positive"}
-{"pid": "202603160235", "title": "永豐餘：中國紙市供過於求　越南擴產第2季貢獻營收", "score": 0.9978, "reason": "top features: f_ip=+4.87, f_economic=+3.36, f_body_length=-1.92", "original_label": "positive"}
-{"pid": "202603163003", "title": "騰輝電子-KY子公司VIG SAMOA決議增資泰國　金額逾5億", "score": 0.9976, "reason": "top features: f_ip=+4.87, f_economic=+3.36, f_body_length=-1.90", "original_label": "positive"}
-{"pid": "202603160240", "title": "因應中東情勢　財政部公告調降3貨品貨物稅50%", "score": 0.9714, "reason": "top features: f_political=+5.25, f_body_length=-1.70, f_keyword_count=-0.43", "original_label": "positive"}
-{"pid": "202603160230", "title": "三峽男肇事逃逸　警追捕開2槍仍未緝獲", "score": 0.9711, "reason": "top features: f_breaking=+4.97, f_body_length=-1.57, f_keyword_count=-0.29", "original_label": "positive"}
-{"pid": "202603160207", "title": "因應中東情勢再開會　卓榮泰：國內天然氣供應無虞", "score": 0.9705, "reason": "top features: f_political=+5.25, f_body_length=-1.87, f_keyword_count=-0.29", "original_label": "positive"}
-{"pid": "202603160210", "title": "管碧玲：海廢逾7成來自中國　盼放下政治尋求解方", "score": 0.9689, "reason": "top features: f_political=+5.25, f_body_length=-1.93, f_keyword_count=-0.29", "original_label": "positive"}
-{"pid": "202603160227", "title": "強化國土安全　內政部補助防災協作中心建置緊急設備", "score": 0.9687, "reason": "top features: f_political=+5.25, f_body_length=-1.93, f_keyword_count=-0.29", "original_label": "positive"}
-{"pid": "202603160234", "title": "男宜蘭南澳登山遭落石擊中骨折　直升機吊掛送醫", "score": 0.9668, "reason": "top features: f_breaking=+4.97, f_body_length=-1.72, f_keyword_count=-0.29", "original_label": "positive"}
-{"pid": "202603160241", "title": "南投名間焚化爐會議警民衝突　許淑華籲理性討論", "score": 0.9643, "reason": "top features: f_breaking=+4.97, f_body_length=-1.79, f_keyword_count=-0.29", "original_label": "positive"}
-{"pid": "202603160226", "title": "以色列打擊黎巴嫩南部真主黨　展開「有限地面行動」", "score": 0.9586, "reason": "top features: f_international=+4.65, f_body_length=-1.77, f_keyword_count=-0.14", "original_label": "positive"}
-{"pid": "202603160236", "title": "美右翼名嘴稱與伊朗通聯被查　遭扣上外國代理人罪名", "score": 0.9484, "reason": "top features: f_international=+4.65, f_body_length=-2.00, f_keyword_count=-0.14", "original_label": "positive"}
-{"pid": "202603160208", "title": "抓寶啟發研究　興大學者以寶可夢神鳥命名新種昆蟲", "score": 0.9451, "reason": "top features: f_ip=+4.87, f_body_length=-1.96, f_low_category=-1.40", "original_label": "positive"}
-{"pid": "202603160211", "title": "騰輝-KY去年賺近半個股本　航太PI材料助攻", "score": 0.9429, "reason": "top features: f_ip=+4.87, f_body_length=-1.89, f_keyword_count=-0.58", "original_label": "positive"}
-{"pid": "202603160213", "title": "1月實質經常性薪資增幅11年同期最高　中東戰事添變數", "score": 0.931, "reason": "top features: f_economic=+3.36, f_body_length=-1.81, f_novelty=+1.08", "original_label": "positive"}
-{"pid": "202603160232", "title": "中國啟動氫能綜合應用試點  2030年拚氫能汽車翻倍", "score": 0.289, "reason": "top features: f_body_length=-1.95, f_novelty=+1.08, f_keyword_count=-0.43", "original_label": "negative"}
-{"pid": "202603160238", "title": "水藍續約國台交  樂團關係如婚姻保持新鮮感", "score": 0.1581, "reason": "top features: f_body_length=-1.93, f_keyword_count=-0.14", "original_label": "negative"}
-{"pid": "202603160228", "title": "道路救援拖吊費4千變4萬告詐欺　新北警送檢偵辦", "score": 0.1577, "reason": "top features: f_body_length=-1.79, f_keyword_count=-0.29", "original_label": "negative"}
-{"pid": "202603160212", "title": "日治醫師之子石津宏返台　盼珍惜歷史延續台日情誼", "score": 0.1453, "reason": "top features: f_body_length=-2.03, f_keyword_count=-0.14", "original_label": "negative"}
-{"pid": "202603160243", "title": "美廉社加盟展接單逾200件　今年加盟占比拚50%", "score": 0.1283, "reason": "top features: f_body_length=-1.74, f_keyword_count=-0.58", "original_label": "negative"}
-{"pid": "202603160233", "title": "經部：微調新竹減壓供水時段促節水　園區導入再生水", "score": 0.1223, "reason": "top features: f_body_length=-1.94, f_keyword_count=-0.43", "original_label": "negative"}
-{"pid": "202603160237", "title": "中國外貿晴雨表　春季廣交會3萬多家企業參展", "score": 0.0584, "reason": "top features: f_body_length=-1.83, f_generic_intl_only=-0.92, f_keyword_count=-0.43", "original_label": "negative"}
-{"pid": "202603160242", "title": "洋蔥採收順暢　中部將進尾聲、屏東4月接力供應", "score": 0.0506, "reason": "top features: f_body_length=-1.79, f_low_category=-1.40, f_keyword_count=-0.14", "original_label": "negative"}
-{"pid": "202603160225", "title": "腎友免疫低下小心病毒攻擊　罹皮蛇風險高1.3倍", "score": 0.0454, "reason": "top features: f_body_length=-1.90, f_low_category=-1.40, f_keyword_count=-0.14", "original_label": "negative"}
-{"pid": "202603160231", "title": "18日前各地舒適溫暖　防日夜溫差逾10度", "score": 0.0445, "reason": "top features: f_body_length=-1.92, f_low_category=-1.40, f_keyword_count=-0.14", "original_label": "negative"}
-{"pid": "202603160239", "title": "林鴻道任國訓中心董事長　趙士強接執行長", "score": 0.0414, "reason": "top features: f_body_length=-1.85, f_sports=-1.55, f_keyword_count=-0.14", "original_label": "negative"}
+{"pid": "202603140101", "title": "拔河摘金世界盃台灣之光", "score": 0.994, "reason": "top features: f_keyword_count=+10.57, f_body_length=-4.99, f_sports=+0.47", "original_label": "positive"}
+{"pid": "202603140027", "title": "中共施壓兩岸國際壓力", "score": 0.9938, "reason": "top features: f_keyword_count=+10.57, f_body_length=-5.10, f_political=+0.56", "original_label": "positive"}
+{"pid": "202603160124", "title": "MQ-9B無人機軍事採購國防", "score": 0.9918, "reason": "top features: f_keyword_count=+10.57, f_body_length=-5.38, f_political=+0.56", "original_label": "positive"}
+{"pid": "202603140078", "title": "台鐵遺失物獵奇服務", "score": 0.9917, "reason": "top features: f_keyword_count=+10.57, f_body_length=-4.84", "original_label": "positive"}
+{"pid": "202603140010", "title": "美伊戰爭軍事衝突國際局勢", "score": 0.9913, "reason": "top features: f_keyword_count=+10.57, f_body_length=-5.21, f_breaking=+0.33", "original_label": "positive"}
+{"pid": "202603160030", "title": "獵魔女團奧斯卡電影台灣之光", "score": 0.9869, "reason": "top features: f_keyword_count=+10.57, f_body_length=-5.30", "original_label": "positive"}
+{"pid": "202603160293", "title": "新竹變電所起火1死竹檢P0等級", "score": 0.9847, "reason": "top features: f_keyword_count=+10.57, f_body_length=-5.46", "original_label": "positive"}
+{"pid": "202603160297", "title": "盛唐興業氨氣外洩公安", "score": 0.9836, "reason": "top features: f_keyword_count=+10.57, f_body_length=-5.52", "original_label": "positive"}
+{"pid": "202603160295", "title": "中國扣押巴拿馬籍報復一帶一路", "score": 0.7616, "reason": "top features: f_keyword_count=+10.57, f_body_length=-5.59, f_generic_intl_only=-2.87", "original_label": "positive"}
+{"pid": "low_pri_1", "title": "某藝人日常生活分享", "score": 0.081, "reason": "top features: f_keyword_count=+5.29, f_body_length=-4.45, f_low_category=-2.32", "original_label": "negative"}
+{"pid": "generic_intl_1", "title": "中國美國日本歐盟關係研究", "score": 0.0389, "reason": "top features: f_keyword_count=+5.29, f_body_length=-4.67, f_generic_intl_only=-2.87", "original_label": "negative"}
+{"pid": "generic_intl_2", "title": "美國大選後續觀察", "score": 0.0356, "reason": "top features: f_keyword_count=+5.29, f_body_length=-4.76, f_generic_intl_only=-2.87", "original_label": "negative"}

@@ -1,418 +1,451 @@
-#!/usr/bin/env python3
-"""SkillEvo v1 — 排序模型訓練腳本（Logistic Regression baseline）。
+"""V1 Headline Ranking Model — 訓練腳本
 
-v1 使用手工特徵 + Logistic Regression 作為 baseline，
-輸出每筆候選稿的 score（0.0–1.0）和可解釋 reason。
+讀取 training_data/gold_set.md，解析正/負樣本及特徵關鍵字，
+產出 keyword-based scoring 模型參數存於 ranking/model/v1_weights.json。
 
-特徵工程：
-  - f_breaking:     是否命中突發關鍵字（binary）
-  - f_political:    是否命中政治關鍵字（binary）
-  - f_economic:     是否命中經濟關鍵字（binary）
-  - f_international: 是否命中國際關鍵字（binary）
-  - f_low_category: 類別是否全為低優先（binary，負向）
-  - f_body_length:  內文長度（log-normalized）
-  - f_keyword_count: sitemap keywords 數量
-
-訓練：
-  - 只使用 label=positive / label=negative 的資料
-  - unlabeled 排除不參與訓練
-
-輸出：
-  - model artifact: ranking/model/v1_weights.json
-  - 預測結果: ranking/model/v1_predictions.jsonl（每行含 pid, score, reason）
-
-用法：
-    cd realtime-news-scout-poc
-    python -m ranking.model.v1_train \
-        --data training_data/samples/seed.jsonl \
-        [--output-weights ranking/model/v1_weights.json] \
-        [--output-predictions ranking/model/v1_predictions.jsonl]
+使用方式：
+    python -m ranking.model.v1_train
+    python -m ranking.model.v1_train --gold-set training_data/gold_set.md
 """
 
 from __future__ import annotations
 
-import argparse
 import json
-import math
+import logging
+import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+logger = logging.getLogger(__name__)
 
-# from training_data.schema import Label, TrainingSample  # noqa: E402
-class Label:
-    POSITIVE = "positive"
-    NEGATIVE = "negative"
-    UNLABELED = "unlabeled"
+# ─────────────────────────────────────────────
+# 資料結構
+# ─────────────────────────────────────────────
 
-# ---------------------------------------------------------------------------
-# 特徵抽取（與 headline_selection check-points 對齊）
-# ---------------------------------------------------------------------------
-
-BREAKING_KW = {
-    "爆炸", "傷亡", "地震", "颱風", "海嘯", "墜機",
-    "槍擊", "恐攻", "核災", "疫情", "封城", "戒嚴",
-    "火警", "衝突", "落石", "骨折", "開槍", "追捕",
-    "事故", "罹難", "搜救", "直升機",
-}
-POLITICAL_KW = {
-    "總統", "行政院", "立法院", "監察院", "司法院",
-    "選舉", "罷免", "彈劾", "修憲", "公投",
-    "國防", "外交", "兩岸", "內政部", "財政部",
-    "卓榮泰", "管碧玲", "國土安全",
-}
-ECONOMIC_KW = {
-    "半導體", "台積電", "AI", "人工智慧",
-    "股市", "央行", "利率", "通膨", "GDP",
-    "貿易", "關稅", "制裁", "薪資", "營收",
-    "增資", "量產",
-}
-INTERNATIONAL_KW = {
-    "以色列", "真主黨", "伊朗", "烏克蘭", "俄羅斯",
-    "北約", "聯合國", "G7", "G20", "APEC",
-}
-
-# 新增：IP / 知名品牌 / 高知名度企業
-IP_KW = {
-    "台積電", "鴻海", "中華電", "聯發科", "NVIDIA",
-    "Apple", "Google", "Tesla", "TSMC",
-    "騰輝", "永豐餘", "寶可夢",
-    "GTC", "人形機器人", "AI伺服器",
-}
-
-# 新增：新奇性關鍵字
-NOVELTY_KW = {
-    "首次", "首度", "創紀錄", "突破", "新種", "命名",
-    "史上", "最高", "最大", "翻倍", "里程碑",
-}
-
-# 新增：高關注賽事
-SPORTS_KW = {
-    "奧運", "世足", "WBC", "MLB", "NBA", "世界盃",
-    "亞運", "大聯盟", "冬奧", "國訓中心",
-}
-
-# 泛國際 — 這些關鍵字單獨命中但無其他正向特徵時應被過濾
-GENERIC_INTL_KW = {
-    "中國", "美國", "日本", "歐盟",
-}
-
-LOW_PRIORITY_CAT = {"entertainment", "sport", "lifestyle"}
-
-FEATURE_NAMES = [
-    "f_breaking",
-    "f_political",
-    "f_economic",
-    "f_international",
-    "f_ip",
-    "f_novelty",
-    "f_sports",
-    "f_generic_intl_only",
-    "f_low_category",
-    "f_body_length",
-    "f_keyword_count",
-]
-
-
-def _has_keyword_hit(title: str, keywords: set[str]) -> bool:
-    """標題是否命中任一關鍵字。"""
-    return any(kw in title for kw in keywords)
-
-
-def extract_features(sample: TrainingSample) -> list[float]:
-    """抽取特徵向量（v1.1 — 含新奇、IP、賽事、泛國際負向）。"""
-    title = sample.title
-    cats = {k.lower() for k in sample.keywords}
-
-    hit_breaking = _has_keyword_hit(title, BREAKING_KW)
-    hit_political = _has_keyword_hit(title, POLITICAL_KW)
-    hit_economic = _has_keyword_hit(title, ECONOMIC_KW)
-    hit_international = _has_keyword_hit(title, INTERNATIONAL_KW)
-    hit_ip = _has_keyword_hit(title, IP_KW)
-    hit_novelty = _has_keyword_hit(title, NOVELTY_KW)
-    hit_sports = _has_keyword_hit(title, SPORTS_KW)
-
-    # 泛國際：命中 GENERIC_INTL_KW 但未命中任何正向特徵
-    hit_generic_intl = _has_keyword_hit(title, GENERIC_INTL_KW)
-    any_positive = any([
-        hit_breaking, hit_political, hit_economic,
-        hit_international, hit_ip, hit_novelty, hit_sports,
-    ])
-    generic_intl_only = hit_generic_intl and not any_positive
-
-    return [
-        1.0 if hit_breaking else 0.0,
-        1.0 if hit_political else 0.0,
-        1.0 if hit_economic else 0.0,
-        1.0 if hit_international else 0.0,
-        1.0 if hit_ip else 0.0,
-        1.0 if hit_novelty else 0.0,
-        1.0 if hit_sports else 0.0,
-        1.0 if generic_intl_only else 0.0,   # 負向特徵
-        1.0 if (cats and cats.issubset(LOW_PRIORITY_CAT)) else 0.0,
-        math.log1p(sample.body_length),  # log-normalized
-        float(len(sample.keywords)),
-    ]
-
-
-# ---------------------------------------------------------------------------
-# Logistic Regression（純 Python，無外部 ML 套件依賴）
-# ---------------------------------------------------------------------------
-
-def _sigmoid(z: float) -> float:
-    """Numerically stable sigmoid."""
-    if z >= 0:
-        return 1.0 / (1.0 + math.exp(-z))
-    ez = math.exp(z)
-    return ez / (1.0 + ez)
+@dataclass
+class TrainingSample:
+    """解析自 gold_set.md 的單一訓練樣本。"""
+    pid: str
+    title: str
+    tags: List[str]
+    weight: int  # +3, +2, +1, -1
+    category: str = ""  # IP/新奇, 軍事, 運動, 災害, 泛國際
+    entities: List[str] = field(default_factory=list)  # 括號內的實體關鍵字
 
 
 @dataclass
-class LogisticModel:
-    """簡易 Logistic Regression（SGD 訓練）。"""
+class FeatureRule:
+    """單一特徵規則。"""
+    name: str
+    keywords: List[str]
+    weight: float
+    category: str
 
-    weights: list[float] = field(default_factory=list)
-    bias: float = 0.0
-    feature_names: list[str] = field(default_factory=lambda: list(FEATURE_NAMES))
 
-    def predict(self, features: list[float]) -> float:
-        """回傳 0.0–1.0 的 score。"""
-        z = self.bias + sum(w * x for w, x in zip(self.weights, features))
-        return _sigmoid(z)
+@dataclass
+class ModelWeights:
+    """V1 模型權重 — keyword-based scoring。"""
+    version: str = "v1.0"
+    trained_at: str = ""
+    sample_count: int = 0
+    positive_count: int = 0
+    negative_count: int = 0
 
-    def explain(self, features: list[float]) -> str:
-        """產生可解釋 reason：列出貢獻最大的特徵。"""
-        contributions = [
-            (self.feature_names[i], self.weights[i] * features[i])
-            for i in range(len(features))
-        ]
-        # 按絕對貢獻排序，取前 3
-        contributions.sort(key=lambda x: abs(x[1]), reverse=True)
-        parts: list[str] = []
-        for name, contrib in contributions[:3]:
-            if abs(contrib) < 0.01:
-                continue
-            sign = "+" if contrib >= 0 else ""
-            parts.append(f"{name}={sign}{contrib:.2f}")
-        if not parts:
-            return "無顯著特徵貢獻"
-        return "top features: " + ", ".join(parts)
+    # 特徵規則
+    feature_rules: List[Dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, object]:
-        """序列化為 dict。"""
-        return {
-            "version": "v1",
-            "feature_names": self.feature_names,
-            "weights": self.weights,
-            "bias": self.bias,
-        }
+    # 全域參數
+    base_score: float = 50.0
+    positive_keyword_boost: float = 15.0
+    negative_keyword_penalty: float = -20.0
+    timeliness_weight: float = 0.3
+    credibility_weight: float = 0.1
 
-    @classmethod
-    def from_dict(cls, data: dict[str, object]) -> LogisticModel:
-        """從 dict 還原。"""
-        return cls(
-            weights=list(data["weights"]),  # type: ignore[arg-type]
-            bias=float(data["bias"]),  # type: ignore[arg-type]
-            feature_names=list(data.get("feature_names", FEATURE_NAMES)),  # type: ignore[arg-type]
-        )
+    # 門檻
+    headline_threshold: float = 72.0
+    strong_reject_threshold: float = 45.0
+
+    # 泛國際抑制
+    generic_international_penalty: float = -25.0
+    generic_international_keywords: List[str] = field(default_factory=list)
+
+    # IP 實體清單 — 從正樣本 entities 提取的「強實體」
+    ip_entities: List[str] = field(default_factory=list)
+    ip_entity_boost: float = 20.0  # 強實體命中時的額外加分
+
+
+# ─────────────────────────────────────────────
+# 解析 gold_set.md
+# ─────────────────────────────────────────────
+
+_SAMPLE_RE = re.compile(
+    r"^- `(\d{12})`\s*\|\s*(.+?)\s*\|\s*tags:\s*(.+?)(?:\s*\|\s*entities:\s*(.*))?$"
+)
+_ENTITY_RE = re.compile(r"\(([^)]+)\)")
+_WEIGHT_RE = re.compile(r"###\s*\[([+-]?\d+)\]")
+_FEATURE_RE = re.compile(
+    r"^\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*([+-]?\d+\.?\d*)\s*\|$"
+)
+
+
+def parse_gold_set(gold_set_path: str) -> Tuple[List[TrainingSample], List[FeatureRule]]:
+    """解析 gold_set.md，回傳 (樣本列表, 特徵規則列表)。
+
+    Args:
+        gold_set_path: gold_set.md 檔案路徑。
+
+    Returns:
+        Tuple of (samples, feature_rules).
+    """
+    path = Path(gold_set_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Gold set not found: {gold_set_path}")
+
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    samples: List[TrainingSample] = []
+    feature_rules: List[FeatureRule] = []
+    current_weight: int = 0
+    current_category: str = ""
+    in_feature_table = False
+
+    for line in lines:
+        line = line.strip()
+
+        # 偵測 weight header: ### [+3] IP/IP 新奇 ...
+        wm = _WEIGHT_RE.match(line)
+        if wm:
+            current_weight = int(wm.group(1))
+            # 提取 category 描述
+            rest = line[wm.end():].strip().lstrip("—").lstrip("-").strip()
+            current_category = rest.split("—")[0].strip() if rest else ""
+            in_feature_table = False
+            continue
+
+        # 偵測特徵摘要表格
+        if "特徵類型" in line and "關鍵字模式" in line:
+            in_feature_table = True
+            continue
+
+        if in_feature_table:
+            fm = _FEATURE_RE.match(line)
+            if fm:
+                feat_name = fm.group(1).strip()
+                keywords_str = fm.group(2).strip()
+                feat_weight = float(fm.group(3).strip())
+                keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
+                feature_rules.append(FeatureRule(
+                    name=feat_name,
+                    keywords=keywords,
+                    weight=feat_weight,
+                    category=feat_name,
+                ))
+            elif line.startswith("|") and "---" in line:
+                continue  # table separator
+            elif not line.startswith("|"):
+                in_feature_table = False
+            continue
+
+        # 偵測樣本行
+        sm = _SAMPLE_RE.match(line)
+        if sm:
+            pid = sm.group(1)
+            title = sm.group(2).strip()
+            tags = [t.strip() for t in sm.group(3).split(",")]
+            # 解析 entities 括號標籤
+            entities_raw = sm.group(4) or ""
+            entities = _ENTITY_RE.findall(entities_raw)
+            samples.append(TrainingSample(
+                pid=pid,
+                title=title,
+                tags=tags,
+                weight=current_weight,
+                category=current_category,
+                entities=entities,
+            ))
+
+    logger.info(
+        "Parsed %d samples (%d positive, %d negative) and %d feature rules",
+        len(samples),
+        sum(1 for s in samples if s.weight > 0),
+        sum(1 for s in samples if s.weight < 0),
+        len(feature_rules),
+    )
+    return samples, feature_rules
+
+
+# ─────────────────────────────────────────────
+# 訓練（特徵工程 + 規則生成）
+# ─────────────────────────────────────────────
+
+def _extract_keyword_patterns(samples: List[TrainingSample]) -> Dict[str, List[str]]:
+    """從正樣本標題中提取高頻關鍵詞模式。"""
+    positive_titles = [s.title for s in samples if s.weight > 0]
+    negative_titles = [s.title for s in samples if s.weight < 0]
+
+    # 以 2-4 字組合做 n-gram 抽取
+    def ngrams(text: str, ns: List[int] = [2, 3, 4]) -> List[str]:
+        result: List[str] = []
+        for n in ns:
+            for i in range(len(text) - n + 1):
+                gram = text[i:i+n]
+                if not re.match(r"^[\u4e00-\u9fff]+$", gram):
+                    continue
+                result.append(gram)
+        return result
+
+    pos_ngrams: Dict[str, int] = {}
+    for title in positive_titles:
+        for gram in ngrams(title):
+            pos_ngrams[gram] = pos_ngrams.get(gram, 0) + 1
+
+    neg_ngrams: Dict[str, int] = {}
+    for title in negative_titles:
+        for gram in ngrams(title):
+            neg_ngrams[gram] = neg_ngrams.get(gram, 0) + 1
+
+    # 正向關鍵字：出現 >=2 次且不在負樣本中
+    positive_keywords = [
+        k for k, v in pos_ngrams.items()
+        if v >= 2 and k not in neg_ngrams
+    ]
+
+    # 負向關鍵字：只出現在負樣本中
+    negative_keywords = [
+        k for k, v in neg_ngrams.items()
+        if v >= 2 and k not in pos_ngrams
+    ]
+
+    return {
+        "positive_auto": sorted(positive_keywords),
+        "negative_auto": sorted(negative_keywords),
+    }
 
 
 def train(
-    samples: list[TrainingSample],
-    *,
-    lr: float = 0.1,
-    epochs: int = 100,
-) -> LogisticModel:
-    """以 SGD 訓練 Logistic Regression。
+    gold_set_path: str = "training_data/gold_set.md",
+    output_path: str = "ranking/model/v1_weights.json",
+) -> ModelWeights:
+    """執行 V1 訓練流程。
 
-    只使用 label=positive / negative 的樣本。
+    Steps:
+        1. 解析 gold_set.md
+        2. 從正/負樣本提取特徵關鍵字
+        3. 結合手動標記的特徵規則
+        4. 計算最佳門檻值
+        5. 輸出 v1_weights.json
 
     Args:
-        samples: 訓練樣本列表。
-        lr: 學習率。
-        epochs: 訓練 epoch 數。
+        gold_set_path: gold_set.md 路徑。
+        output_path: 輸出權重檔路徑。
 
     Returns:
-        訓練完成的 LogisticModel。
+        訓練完成的 ModelWeights。
     """
-    # 篩選有標註的資料
-    labeled = [
-        s for s in samples
-        if s.label in (Label.POSITIVE, Label.NEGATIVE)
-    ]
+    logger.info("=== V1 Training Started ===")
+    logger.info("Gold set: %s", gold_set_path)
 
-    if not labeled:
-        print("⚠️ 無有效標註資料，回傳零權重模型")
-        return LogisticModel(weights=[0.0] * len(FEATURE_NAMES))
+    # Step 1: 解析
+    samples, feature_rules = parse_gold_set(gold_set_path)
+    if not samples:
+        raise ValueError("No training samples found in gold set")
 
-    n_features = len(FEATURE_NAMES)
-    model = LogisticModel(weights=[0.0] * n_features)
+    positive_samples = [s for s in samples if s.weight > 0]
+    negative_samples = [s for s in samples if s.weight < 0]
 
-    # 準備資料
-    data: list[tuple[list[float], float]] = []
-    for s in labeled:
-        feat = extract_features(s)
-        y = 1.0 if s.label == Label.POSITIVE else 0.0
-        data.append((feat, y))
+    # Step 1.5: 提取正樣本 IP 實體
+    ip_entities: List[str] = []
+    for s in positive_samples:
+        for ent in s.entities:
+            if ent not in ip_entities:
+                ip_entities.append(ent)
+    logger.info("Extracted %d IP entities from positive samples: %s", len(ip_entities), ip_entities)
 
-    print(f"📊 訓練資料: {len(data)} 筆 "
-          f"(positive={sum(1 for _, y in data if y > 0.5)}, "
-          f"negative={sum(1 for _, y in data if y <= 0.5)})")
+    # Step 2: 自動提取關鍵字
+    auto_keywords = _extract_keyword_patterns(samples)
+    logger.info(
+        "Auto-extracted: %d positive keywords, %d negative keywords",
+        len(auto_keywords["positive_auto"]),
+        len(auto_keywords["negative_auto"]),
+    )
 
-    # SGD 訓練
-    for epoch in range(epochs):
-        total_loss = 0.0
-        for feat, y in data:
-            pred = model.predict(feat)
-            error = pred - y
-            total_loss += -y * math.log(max(pred, 1e-15)) - (1 - y) * math.log(max(1 - pred, 1e-15))
+    # Step 3: 建構特徵規則
+    rules: List[Dict[str, Any]] = []
+    for fr in feature_rules:
+        rules.append({
+            "name": fr.name,
+            "keywords": fr.keywords,
+            "weight": fr.weight,
+            "category": fr.category,
+        })
 
-            # 梯度更新
-            for i in range(n_features):
-                model.weights[i] -= lr * error * feat[i]
-            model.bias -= lr * error
+    # 加入 IP 實體特徵規則（強實體 — 最高加權）
+    if ip_entities:
+        rules.append({
+            "name": "ip_entities",
+            "keywords": ip_entities,
+            "weight": 4.0,  # 比一般正向規則更高
+            "category": "IP實體(自動提取)",
+        })
 
-        if (epoch + 1) % 20 == 0:
-            avg_loss = total_loss / len(data)
-            print(f"  epoch {epoch + 1:>4d}/{epochs}: loss={avg_loss:.4f}")
+    # 加入自動提取的關鍵字
+    if auto_keywords["positive_auto"]:
+        rules.append({
+            "name": "auto_positive",
+            "keywords": auto_keywords["positive_auto"],
+            "weight": 2.0,
+            "category": "自動提取正向",
+        })
+    if auto_keywords["negative_auto"]:
+        rules.append({
+            "name": "auto_negative",
+            "keywords": auto_keywords["negative_auto"],
+            "weight": -1.5,
+            "category": "自動提取負向",
+        })
 
-    return model
+    # Step 4: 計算門檻值 — 模擬 scoring 後取最佳分界
+    # 泛國際負面關鍵字
+    generic_intl_keywords: List[str] = []
+    for fr in feature_rules:
+        if fr.weight < 0:
+            generic_intl_keywords.extend(fr.keywords)
+    generic_intl_keywords.extend(auto_keywords.get("negative_auto", []))
+
+    # 模擬 scoring
+    def simulate_score(sample: TrainingSample) -> float:
+        score = 50.0  # base
+        title = sample.title
+        for rule in rules:
+            matched = any(kw in title for kw in rule["keywords"])
+            if matched:
+                score += rule["weight"] * 5.0  # amplify for scoring
+
+        # 泛國際抑制
+        if any(kw in title for kw in generic_intl_keywords):
+            score -= 25.0
+
+        return max(0.0, min(100.0, score))
+
+    pos_scores = [(s.pid, simulate_score(s)) for s in positive_samples]
+    neg_scores = [(s.pid, simulate_score(s)) for s in negative_samples]
+
+    logger.info("--- Positive sample scores ---")
+    for pid, score in pos_scores:
+        logger.info("  [+] %s: %.1f", pid, score)
+
+    logger.info("--- Negative sample scores ---")
+    for pid, score in neg_scores:
+        logger.info("  [-] %s: %.1f", pid, score)
+
+    # 找最佳門檻：max(正樣本最低分, 負樣本最高分 + margin)
+    min_pos_score = min(s for _, s in pos_scores) if pos_scores else 70.0
+    max_neg_score = max(s for _, s in neg_scores) if neg_scores else 40.0
+    margin = 5.0
+    optimal_threshold = max(max_neg_score + margin, min_pos_score - margin)
+    optimal_threshold = round(optimal_threshold, 1)
+
+    logger.info("Min positive score: %.1f", min_pos_score)
+    logger.info("Max negative score: %.1f", max_neg_score)
+    logger.info("Optimal threshold: %.1f (margin=%.1f)", optimal_threshold, margin)
+
+    # Step 5: 建立 ModelWeights
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    weights = ModelWeights(
+        version="v1.1",
+        trained_at=now_iso,
+        sample_count=len(samples),
+        positive_count=len(positive_samples),
+        negative_count=len(negative_samples),
+        feature_rules=rules,
+        base_score=50.0,
+        positive_keyword_boost=15.0,
+        negative_keyword_penalty=-20.0,
+        timeliness_weight=0.3,
+        credibility_weight=0.1,
+        headline_threshold=optimal_threshold,
+        strong_reject_threshold=max(max_neg_score - 5.0, 30.0),
+        generic_international_penalty=-25.0,
+        generic_international_keywords=list(set(generic_intl_keywords)),
+        ip_entities=ip_entities,
+        ip_entity_boost=20.0,
+    )
+
+    # 輸出
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    weights_dict = {
+        "version": weights.version,
+        "trained_at": weights.trained_at,
+        "sample_count": weights.sample_count,
+        "positive_count": weights.positive_count,
+        "negative_count": weights.negative_count,
+        "feature_rules": weights.feature_rules,
+        "base_score": weights.base_score,
+        "positive_keyword_boost": weights.positive_keyword_boost,
+        "negative_keyword_penalty": weights.negative_keyword_penalty,
+        "timeliness_weight": weights.timeliness_weight,
+        "credibility_weight": weights.credibility_weight,
+        "headline_threshold": weights.headline_threshold,
+        "strong_reject_threshold": weights.strong_reject_threshold,
+        "generic_international_penalty": weights.generic_international_penalty,
+        "generic_international_keywords": weights.generic_international_keywords,
+        "ip_entities": weights.ip_entities,
+        "ip_entity_boost": weights.ip_entity_boost,
+    }
+
+    output.write_text(
+        json.dumps(weights_dict, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    logger.info("Weights saved to %s", output_path)
+
+    # Step 6: 同步 IP 實體到 headline_selection.py 的 cp-ip 清單
+    if ip_entities:
+        from ranking.headline_selection import sync_ip_entities
+        sync_ip_entities(ip_entities)
+        logger.info("Synced %d IP entities to headline_selection cp-ip list", len(ip_entities))
+
+    # 訓練報告
+    logger.info("=== V1 Training Complete ===")
+    logger.info("  Samples: %d (+%d / -%d)", len(samples), len(positive_samples), len(negative_samples))
+    logger.info("  Feature rules: %d", len(rules))
+    logger.info("  Headline threshold: %.1f", weights.headline_threshold)
+    logger.info("  Strong reject threshold: %.1f", weights.strong_reject_threshold)
+    logger.info("  Generic intl keywords: %d", len(weights.generic_international_keywords))
+
+    return weights
 
 
-# ---------------------------------------------------------------------------
-# 預測 & 輸出
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Prediction:
-    """單筆預測結果。"""
-
-    pid: str
-    title: str
-    score: float
-    reason: str
-    original_label: str
-
-
-def predict_all(
-    model: LogisticModel,
-    samples: list[TrainingSample],
-) -> list[Prediction]:
-    """對所有樣本（含 unlabeled）預測。"""
-    results: list[Prediction] = []
-    for s in samples:
-        feat = extract_features(s)
-        score = model.predict(feat)
-        reason = model.explain(feat)
-        results.append(Prediction(
-            pid=s.pid,
-            title=s.title,
-            score=round(score, 4),
-            reason=reason,
-            original_label=str(s.label),
-        ))
-    results.sort(key=lambda r: r.score, reverse=True)
-    return results
-
-
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────
 # CLI
-# ---------------------------------------------------------------------------
-
-def load_samples(path: Path) -> list[dict]:
-    """從 JSONL 載入 TrainingSample（Mock 版本，不依賴 Pydantic）。"""
-    samples: list[dict] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            data = json.loads(line)
-            # 將 dict 包裝成類似 TrainingSample 的對象
-            class SimpleSample:
-                def __init__(self, d):
-                    self.pid = d["pid"]
-                    self.url = d["url"]
-                    self.title = d["title"]
-                    self.keywords = d.get("keywords", [])
-                    self.body_length = d.get("body_length", 0)
-                    self.label = d["label"]
-            samples.append(SimpleSample(data))
-    return samples
-
-
-def main() -> None:
-    """CLI 入口。"""
-    parser = argparse.ArgumentParser(description="SkillEvo v1 排序模型訓練")
-    parser.add_argument(
-        "--data", "-d",
-        type=Path,
-        default=Path("training_data/samples/seed.jsonl"),
-        help="訓練資料 JSONL 路徑",
-    )
-    parser.add_argument(
-        "--output-weights", "-w",
-        type=Path,
-        default=Path("ranking/model/v1_weights.json"),
-        help="模型權重輸出路徑",
-    )
-    parser.add_argument(
-        "--output-predictions", "-p",
-        type=Path,
-        default=Path("ranking/model/v1_predictions.jsonl"),
-        help="預測結果輸出路徑",
-    )
-    parser.add_argument("--lr", type=float, default=0.1, help="學習率")
-    parser.add_argument("--epochs", type=int, default=100, help="訓練 epochs")
-    args = parser.parse_args()
-
-    # 載入資料
-    print(f"📥 載入訓練資料: {args.data}")
-    samples = load_samples(args.data)
-    print(f"   共 {len(samples)} 筆")
-
-    # 訓練
-    print("🏋️ 開始訓練...")
-    model = train(samples, lr=args.lr, epochs=args.epochs)
-
-    # 儲存權重
-    args.output_weights.parent.mkdir(parents=True, exist_ok=True)
-    with args.output_weights.open("w", encoding="utf-8") as f:
-        json.dump(model.to_dict(), f, ensure_ascii=False, indent=2)
-    print(f"💾 權重已儲存: {args.output_weights}")
-
-    # 預測
-    preds = predict_all(model, samples)
-    args.output_predictions.parent.mkdir(parents=True, exist_ok=True)
-    with args.output_predictions.open("w", encoding="utf-8") as f:
-        for p in preds:
-            f.write(json.dumps({
-                "pid": p.pid,
-                "title": p.title,
-                "score": p.score,
-                "reason": p.reason,
-                "original_label": p.original_label,
-            }, ensure_ascii=False) + "\n")
-    print(f"📤 預測結果已儲存: {args.output_predictions}")
-
-    # 摘要
-    print("\n📊 預測摘要（前 5 名）:")
-    for p in preds[:5]:
-        print(f"  {p.score:.4f} | [{p.original_label:>9s}] {p.title[:40]}... | {p.reason}")
-
-    # Accuracy on labeled data
-    labeled_preds = [p for p in preds if p.original_label != "unlabeled"]
-    if labeled_preds:
-        correct = sum(
-            1 for p in labeled_preds
-            if (p.score >= 0.5 and p.original_label == "positive")
-            or (p.score < 0.5 and p.original_label == "negative")
-        )
-        acc = correct / len(labeled_preds)
-        print(f"\n🎯 標註資料 accuracy: {correct}/{len(labeled_preds)} = {acc:.1%}")
-
+# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
+    parser = argparse.ArgumentParser(description="V1 Headline Ranking Model Training")
+    parser.add_argument(
+        "--gold-set",
+        default="training_data/gold_set.md",
+        help="Path to gold_set.md",
+    )
+    parser.add_argument(
+        "--output",
+        default="ranking/model/v1_weights.json",
+        help="Output weights JSON path",
+    )
+    args = parser.parse_args()
+
+    weights = train(gold_set_path=args.gold_set, output_path=args.output)
+    print(f"\n✅ Training complete. Threshold: {weights.headline_threshold}")
