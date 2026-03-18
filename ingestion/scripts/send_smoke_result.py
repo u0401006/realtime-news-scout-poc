@@ -5,6 +5,13 @@ send_smoke_result.py
 讀取 smoke test 輸出的 JSONL 選稿結果，格式化為「入選/未入選 + 理由」清單，
 支援 dry-run（預設）與實際 OpenClaw message 發送。
 
+V2 升級（2026-03-18）：
+  - 完整支援 V2 嵌套格式（content / scoring / classification / metadata）
+  - 顯示 V2Scorer 浮動門檻（effectiveThreshold）
+  - 顯示 gTrend / 經濟震盪 / IP 匹配等 Boost 資訊
+  - Content Tier 分層顯示與統計
+  - 保留 V1 flat 格式向下相容
+
 使用方式：
   # Dry-run（預設，僅印出格式化訊息，不發送）
   python3 send_smoke_result.py --input smoke_output.jsonl
@@ -15,15 +22,26 @@ send_smoke_result.py
   # 限制輸出筆數
   python3 send_smoke_result.py --input smoke_output.jsonl --limit 10
 
-JSONL 輸入格式（每行一個 JSON 物件）：
+V2 JSONL 輸入格式（每行一個 JSON 物件）：
   {
-    "title": "新聞標題",
-    "url": "https://...",
-    "selected": true,          # true = 入選, false = 未入選
-    "reason": "選稿理由說明",
-    "score": 0.87,             # 可選，評分
-    "source": "CNA",           # 可選，來源
-    "publishedAt": "2026-03-16T10:00:00+08:00"  # 可選
+    "content": { "title": "...", "url": "...", "pid": "...", ... },
+    "scoring": {
+      "newsValue": 75,
+      "selected": true,
+      "reason": "...",
+      "effectiveThreshold": 94.0,
+      "gtrendBoost": 5.0,
+      "economicBoost": 0.0,
+      "ipMatches": ["台積電"]
+    },
+    "classification": { "contentTier": "P0_main", "tierReason": "..." },
+    "metadata": { "scorerVersion": "v2", ... }
+  }
+
+V1 JSONL 輸入格式（向下相容）：
+  {
+    "title": "...", "url": "...", "selected": true,
+    "reason": "...", "score": 0.87
   }
 """
 
@@ -42,6 +60,15 @@ REJECTED_ICON = "❌"
 MAX_TITLE_LEN = 60
 MAX_REASON_LEN = 120
 TZ_TAIPEI = timezone(timedelta(hours=8))
+
+# Content Tier 顯示名稱映射
+TIER_LABELS: dict[str, str] = {
+    "P0_short": "🔴 快訊",
+    "P0_main": "🟠 主體",
+    "P1_followup": "🟡 追蹤",
+    "P2_response": "🔵 回應",
+    "P3_analysis": "🟣 分析",
+}
 
 
 # ─────────────────────────────────────────
@@ -63,6 +90,45 @@ def load_jsonl(path: Path) -> list[dict]:
 
 
 # ─────────────────────────────────────────
+# V2 格式偵測
+# ─────────────────────────────────────────
+def _is_v2(rec: dict) -> bool:
+    """偵測是否為 V2 嵌套格式。"""
+    return "content" in rec and "scoring" in rec
+
+
+# ─────────────────────────────────────────
+# 統一欄位存取（V1/V2 相容）
+# ─────────────────────────────────────────
+def _get_field(rec: dict, field: str, default=None):
+    """從 V1 或 V2 格式中統一取欄位值。"""
+    if _is_v2(rec):
+        mapping = {
+            "selected": ("scoring", "selected"),
+            "title": ("content", "title"),
+            "url": ("content", "url"),
+            "pid": ("content", "pid"),
+            "reason": ("scoring", "reason"),
+            "score": ("scoring", "newsValue"),
+            "contentTier": ("classification", "contentTier"),
+            "tierReason": ("classification", "tierReason"),
+            "effectiveThreshold": ("scoring", "effectiveThreshold"),
+            "gtrendBoost": ("scoring", "gtrendBoost"),
+            "economicBoost": ("scoring", "economicBoost"),
+            "ipMatches": ("scoring", "ipMatches"),
+            "isFallback": ("scoring", "isFallback"),
+            "scorerVersion": ("metadata", "scorerVersion"),
+        }
+        if field in mapping:
+            section, key = mapping[field]
+            return rec.get(section, {}).get(key, default)
+        return default
+    else:
+        # V1 直接取 key
+        return rec.get(field, default)
+
+
+# ─────────────────────────────────────────
 # 格式化單筆結果
 # ─────────────────────────────────────────
 def _truncate(text: str, maxlen: int) -> str:
@@ -72,33 +138,67 @@ def _truncate(text: str, maxlen: int) -> str:
 
 
 def format_record(rec: dict, index: int) -> str:
-    selected: bool = bool(rec.get("selected", False))
+    """格式化單筆結果。支援 V1 (flat) 與 V2 (nested) 格式。"""
+    selected = bool(_get_field(rec, "selected", False))
+    title = _truncate(str(_get_field(rec, "title", "(無標題)")), MAX_TITLE_LEN)
+    reason = _truncate(str(_get_field(rec, "reason", "(無理由)")), MAX_REASON_LEN)
+    score = _get_field(rec, "score")
+    url = _get_field(rec, "url", "")
+
     icon = SELECTED_ICON if selected else REJECTED_ICON
     status = "入選" if selected else "未入選"
 
-    title = _truncate(str(rec.get("title", "(無標題)")), MAX_TITLE_LEN)
-    reason = _truncate(str(rec.get("reason", "(無理由)")), MAX_REASON_LEN)
+    # 組合訊息
+    parts = [f"{icon} [{index}] {title}"]
+    parts.append(f"  狀態：{status}")
 
-    # 可選欄位
-    score_str = ""
-    if "score" in rec:
-        score_str = f"  分數：{rec['score']:.2f}\n"
+    # Content Tier（V2）
+    tier = _get_field(rec, "contentTier", "")
+    if tier:
+        tier_label = TIER_LABELS.get(tier, tier)
+        parts.append(f"  分層：{tier_label}")
 
-    source_str = ""
-    if "source" in rec:
-        source_str = f"  來源：{rec['source']}\n"
+    # 分數與門檻（V2 顯示門檻對比）
+    threshold = _get_field(rec, "effectiveThreshold", 0.0)
+    if score is not None:
+        if threshold and threshold > 0:
+            margin = score - threshold
+            margin_str = f"+{margin:.0f}" if margin >= 0 else f"{margin:.0f}"
+            parts.append(f"  分數：{score} / 門檻 {threshold:.0f}（{margin_str}）")
+        else:
+            parts.append(f"  分數：{score}")
 
-    url = rec.get("url", "")
-    url_str = f"  {url}\n" if url else ""
+    parts.append(f"  理由：{reason}")
 
-    return (
-        f"{icon} [{index}] {title}\n"
-        f"  狀態：{status}\n"
-        f"  理由：{reason}\n"
-        f"{score_str}"
-        f"{source_str}"
-        f"{url_str}"
-    )
+    # V2 Boost 詳情
+    gtrend = _get_field(rec, "gtrendBoost", 0.0)
+    economic = _get_field(rec, "economicBoost", 0.0)
+    ip_matches = _get_field(rec, "ipMatches", [])
+
+    boosts = []
+    if gtrend and gtrend > 0:
+        boosts.append(f"gTrend +{gtrend:.1f}")
+    if economic and economic > 0:
+        boosts.append(f"經濟震盪 +{economic:.1f}")
+    if ip_matches:
+        boosts.append(f"IP: {', '.join(ip_matches[:3])}")
+
+    if boosts:
+        parts.append(f"  加分：{' | '.join(boosts)}")
+
+    # Tier 理由（V2）
+    tier_reason = _get_field(rec, "tierReason", "")
+    if tier_reason:
+        parts.append(f"  分層依據：{tier_reason}")
+
+    # V1 source
+    if not _is_v2(rec) and "source" in rec:
+        parts.append(f"  來源：{rec['source']}")
+
+    if url:
+        parts.append(f"  {url}")
+
+    return "\n".join(parts) + "\n"
 
 
 # ─────────────────────────────────────────
@@ -106,21 +206,68 @@ def format_record(rec: dict, index: int) -> str:
 # ─────────────────────────────────────────
 def build_message(records: list[dict], window_label: str = "") -> str:
     now = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M")
+
     total = len(records)
-    selected_count = sum(1 for r in records if r.get("selected", False))
-    rejected_count = total - selected_count
+    selected_recs = [r for r in records if _get_field(r, "selected", False)]
+    rejected_recs = [r for r in records if not _get_field(r, "selected", False)]
+
+    selected_count = len(selected_recs)
+    rejected_count = len(rejected_recs)
+
+    # 偵測版本
+    any_v2 = any(_is_v2(r) for r in records)
+    version_tag = "V2 Scorer" if any_v2 else "V1"
+
+    # V2 統計
+    stats_parts = []
+    if any_v2:
+        scores = [_get_field(r, "score", 0) for r in records]
+        thresholds = [_get_field(r, "effectiveThreshold", 0.0) for r in records]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        avg_threshold = sum(thresholds) / len(thresholds) if thresholds else 0
+
+        stats_parts.append(f"平均分數：{avg_score:.1f} / 平均門檻：{avg_threshold:.0f}")
+
+        # Tier 分佈
+        tier_counts: dict[str, int] = {}
+        for r in records:
+            t = _get_field(r, "contentTier", "unknown")
+            tier_counts[t] = tier_counts.get(t, 0) + 1
+
+        tier_strs = []
+        for tier_name in ["P0_short", "P0_main", "P1_followup", "P2_response", "P3_analysis"]:
+            cnt = tier_counts.get(tier_name, 0)
+            if cnt > 0:
+                label = TIER_LABELS.get(tier_name, tier_name)
+                tier_strs.append(f"{label} ×{cnt}")
+        if tier_strs:
+            stats_parts.append("分層：" + "  ".join(tier_strs))
+
+        # Boost 統計
+        gtrend_n = sum(1 for r in records if (_get_field(r, "gtrendBoost", 0.0) or 0) > 0)
+        economic_n = sum(1 for r in records if (_get_field(r, "economicBoost", 0.0) or 0) > 0)
+        ip_n = sum(1 for r in records if _get_field(r, "ipMatches", []))
+        boost_strs = []
+        if gtrend_n:
+            boost_strs.append(f"gTrend {gtrend_n}篇")
+        if economic_n:
+            boost_strs.append(f"經濟震盪 {economic_n}篇")
+        if ip_n:
+            boost_strs.append(f"IP匹配 {ip_n}篇")
+        if boost_strs:
+            stats_parts.append("加分：" + " | ".join(boost_strs))
 
     header = (
-        f"📰 *Smoke Test 選稿結果*\n"
+        f"📰 *Smoke Test 選稿結果 ({version_tag})*\n"
         f"時間：{now}"
         + (f"\n視窗：{window_label}" if window_label else "")
         + f"\n入選 {selected_count} 篇 ／ 未入選 {rejected_count} 篇\n"
-        + "─" * 30
     )
 
-    # 先列出入選，再列出未入選
-    selected_recs = [r for r in records if r.get("selected", False)]
-    rejected_recs = [r for r in records if not r.get("selected", False)]
+    if stats_parts:
+        header += "\n".join(stats_parts) + "\n"
+
+    header += "─" * 30
 
     parts = [header]
 
@@ -237,6 +384,13 @@ def main():
         sys.exit(0)
 
     print(f"[INFO] 讀取 {len(records)} 筆資料", file=sys.stderr)
+
+    # 偵測格式版本
+    v2_count = sum(1 for r in records if _is_v2(r))
+    if v2_count > 0:
+        print(f"[INFO] 偵測到 V2 格式 ({v2_count}/{len(records)} 筆)", file=sys.stderr)
+    else:
+        print("[INFO] V1 格式", file=sys.stderr)
 
     # 限制筆數
     if args.limit > 0:

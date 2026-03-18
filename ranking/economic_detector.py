@@ -66,7 +66,7 @@ _SEVERE_PCT_BOOST: float = 15.0     # 漲跌幅 > 2%
 _EXTREME_PCT_BOOST: float = 25.0    # 漲跌幅 > 5%
 _SHOCK_KEYWORD_BOOST: float = 10.0  # 震盪動作詞加分
 _POLICY_SHOCK_BOOST: float = 8.0    # 政策衝擊加分
-_ECONOMIC_CAP: float = 40.0         # 經濟加分上限
+_ECONOMIC_CAP: float = 25.0         # 經濟加分上限（v2.17: 從 40.0 降至 25.0）
 
 
 @dataclass

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 import statistics
 from collections import deque
@@ -79,6 +80,12 @@ _TSMC_TIER_4 = ["曾繁城", "蔣尚義", "梁孟松", "孫元成", "前幹部",
 
 # ─── 政治核心加權 ───
 _POLITICAL_CORE = ["柯文哲", "境管", "民眾黨", "黃國昌"]
+
+# ─── 投顧/盤前盤後例行訊息降權 (v2.17) ───
+_ROUTINE_COMMENTARY_KEYWORDS: List[str] = [
+    "投顧", "盤前", "盤後", "法人看", "展望", "操作建議", "策略分析",
+]
+_ROUTINE_COMMENTARY_PENALTY: float = -30.0
 
 
 @dataclass
@@ -165,13 +172,17 @@ class V2Scorer:
         self._score_history: Deque[float] = deque(maxlen=window_size)
         self._volatility_history: Deque[float] = deque(maxlen=_VOLATILITY_WINDOW)
 
-        # gTrend Loader
+        # gTrend Loader + mtime 追蹤 (v2.17: 每輪評分自動偵測變更)
+        self._gtrend_csv_path: Optional[str] = gtrend_csv
+        self._gtrend_csv_mtime: float = 0.0
         self._gtrend: Optional[GTrendLoader] = None
         if gtrend_csv or gtrend_dir:
             self._gtrend = GTrendLoader(
                 csv_path=gtrend_csv,
                 csv_dir=gtrend_dir,
             )
+            if gtrend_csv:
+                self._gtrend_csv_mtime = self._get_mtime(gtrend_csv)
             logger.info(
                 "V2Scorer: gTrend loaded, %d keywords",
                 self._gtrend.keyword_count,
@@ -187,7 +198,9 @@ class V2Scorer:
         # CP-Economic 偵測器
         self._economic_detector = EconomicDetector()
 
-        # Firebase Loader
+        # Firebase Loader + mtime 追蹤 (v2.17: 每輪評分自動偵測變更)
+        self._firebase_cache_path: Optional[str] = firebase_cache
+        self._firebase_cache_mtime: float = 0.0
         self._firebase: Optional[FirebaseLoader] = None
         if firebase_project_id or firebase_cache:
             try:
@@ -196,6 +209,8 @@ class V2Scorer:
                     cache_path=firebase_cache,
                     service_account=firebase_service_account,
                 )
+                if firebase_cache:
+                    self._firebase_cache_mtime = self._get_mtime(firebase_cache)
                 logger.info(
                     "V2Scorer: Firebase loaded, %d trending items",
                     self._firebase.trending_count,
@@ -222,6 +237,57 @@ class V2Scorer:
     def score_history_size(self) -> int:
         """目前滑動視窗中的分數數量。"""
         return len(self._score_history)
+
+    # ─── mtime 偵測 & 自動重新載入 (v2.17) ───
+
+    @staticmethod
+    def _get_mtime(path: str) -> float:
+        """取得檔案的 mtime，不存在時回傳 0.0。"""
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
+    def _maybe_reload_data(self) -> None:
+        """在每次評分前檢查 gTrend CSV / Firebase JSON 是否有更新。
+
+        透過比對 file mtime 避免無變更時的多餘 IO。
+        """
+        # gTrend CSV
+        if self._gtrend_csv_path:
+            current_mtime = self._get_mtime(self._gtrend_csv_path)
+            if current_mtime > self._gtrend_csv_mtime:
+                try:
+                    if self._gtrend is None:
+                        self._gtrend = GTrendLoader(csv_path=self._gtrend_csv_path)
+                    else:
+                        self._gtrend = GTrendLoader(csv_path=self._gtrend_csv_path)
+                    self._gtrend_csv_mtime = current_mtime
+                    logger.info(
+                        "V2Scorer: gTrend CSV reloaded (mtime changed), %d keywords",
+                        self._gtrend.keyword_count,
+                    )
+                except Exception as e:
+                    logger.warning("V2Scorer: gTrend CSV reload failed: %s", e)
+
+        # Firebase JSON cache
+        if self._firebase_cache_path:
+            current_mtime = self._get_mtime(self._firebase_cache_path)
+            if current_mtime > self._firebase_cache_mtime:
+                try:
+                    if self._firebase is None:
+                        self._firebase = FirebaseLoader(
+                            cache_path=self._firebase_cache_path,
+                        )
+                    else:
+                        self._firebase.load_cache(self._firebase_cache_path)
+                    self._firebase_cache_mtime = current_mtime
+                    logger.info(
+                        "V2Scorer: Firebase cache reloaded (mtime changed), %d trending items",
+                        self._firebase.trending_count,
+                    )
+                except Exception as e:
+                    logger.warning("V2Scorer: Firebase cache reload failed: %s", e)
 
     # ─── 浮動門檻計算 ───
 
@@ -467,6 +533,9 @@ class V2Scorer:
         summary_text: str = "",
     ) -> V2ScoreResult:
         """對一則新聞進行 V2 headline-worthiness 評分。"""
+        # v2.17: 每次評分前自動偵測 gTrend/Firebase 檔案變更並重新載入
+        self._maybe_reload_data()
+
         text = title + " " + summary_text
         topic_tags = topic_tags or []
         region_tags = region_tags or []
@@ -539,12 +608,6 @@ class V2Scorer:
         matched_rules.append(f"分層IP({','.join(set(ip_matches))})")
 
         # ── Step 3: gTrend 與其他加分 ──
-        # 載入動態趨勢數據
-        if self._gtrend:
-             self._gtrend.load_csv("/Users/capo_mac_mini/.openclaw/agents/main/google_trend_12hr.csv")
-        if self._firebase:
-             self._firebase.load_cache("/Users/capo_mac_mini/.openclaw/agents/main/firebase_cache.json")
-
         gtrend_boost, gtrend_keywords = self._compute_gtrend_boost(text)
         score += gtrend_boost
 
@@ -563,6 +626,13 @@ class V2Scorer:
             elif "揭" in title or "揭露" in text:
                 # 即使沒報告字眼，但內文有具體揭露行為
                 score += 35.0
+
+        # ── Step 3.5: 投顧/盤前盤後例行訊息降權 (v2.17) ──
+        if any(kw in title for kw in _ROUTINE_COMMENTARY_KEYWORDS):
+            score += _ROUTINE_COMMENTARY_PENALTY
+            matched_kws = [kw for kw in _ROUTINE_COMMENTARY_KEYWORDS if kw in title]
+            breakdown["routine_commentary_penalty"] = _ROUTINE_COMMENTARY_PENALTY
+            matched_rules.append(f"投顧例行降權({','.join(matched_kws)})")
 
         # ── Step 4: Tier 權重乘法 ──
         # 歷史人物逝世降權
