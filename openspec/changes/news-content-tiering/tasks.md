@@ -1,5 +1,0 @@
-- [ ] 定義 content_tier 規則與關鍵詞映射
-- [ ] 在 v1_scorer 輸出 `content_tier` 與 `tier_reason`
-- [ ] 調整同分排序使用 tier 優先序
-- [ ] 補齊 P0~P3 測試樣本與單元測試
-- [ ] 在 smoke 結果輸出 tier 欄位供人工審閱
