@@ -87,15 +87,32 @@
 
 ---
 
-## ADR-004: 事件鏈欄位對齊與跨 Repo 協定
+## ADR-004: 事件鏈生命週期管理
 
 **日期**: 2026-04-06
 
 **狀態**: accepted
 
-**任務 ID**: BE-EVENT-LIFECYCLE-REVISE
+**任務 ID**: BE-EVENT-LIFECYCLE-REVISE / BE-EVENT-LIFECYCLE-REVISE-2
 
 **背景**:
+
+事件鏈系統需要明確的生命週期定義，洵蓋孔化、成長、熱點與退場四個階段。同時在 L2 審查中發現欄位不一致問題，圖此合併式記錄。
+
+### 事件鏈生命週期
+
+| Phase    | momentum 範圍       | 話明                          | 觸發行為             |
+|----------|-----------------|----------------------------------|--------------------|
+| Emerging | 0.2 ≤ m < 0.5   | 孔化中，初期訊號，持續觀察         | 無              |
+| Growing  | 0.5 ≤ m < 0.8   | 成長中，熱度上升，進入追蹤清單     | 無              |
+| Peaking  | m ≥ 0.8         | 熱點，觸發 Wiki 自動升格             | 升格為 Wiki 檔案      |
+| Fading   | m < 0.2         | 衰退，接近退場，非熱點                | 無              |
+
+**出場（GC 門樻）**: `momentum < 0.1`—事件鏈在 `save()` 時被物理移除，不保留任何記錄。
+
+**升格（Promotion 門樻）**: `momentum >= 0.8` 且 `promoted_to_wiki == False`—自動生成 Wiki Markdown 檔案并標記為已升格。
+
+**背景（欄位不一致問題）**:
 
 在 L2 審查中發現，`main-brain` 的 `wiki_compiler.py` 升格邏輯讀取 `label` 欄位作為事件名稱，
 但 `realtime-news-scout-poc` 輸出的生產資料（`event_state.json`）使用 `display_name` 欄位。
