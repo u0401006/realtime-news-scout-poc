@@ -21,9 +21,9 @@ train:
 		--output-weights ranking/model/v1_weights.json \
 		--output-predictions ranking/model/v1_predictions.jsonl
 
-## 執行測試
+## 執行測試（全套）
 test:
-	$(PYTHON) -m pytest tests/test_skillevo_v1.py -v
+	$(PYTHON) -m pytest tests/ -v
 
 ## 一鍵驗收：回填 → 訓練 → 測試
 verify: backfill train test

@@ -84,3 +84,66 @@
 - `realtime-news-scout-poc/context/DECISIONS.md`（本文件，新建）
 
 **決策者**: Backend Agent（BE-EVENT-LIFECYCLE-20260406）
+
+---
+
+## ADR-004: 事件鏈欄位對齊與跨 Repo 協定
+
+**日期**: 2026-04-06
+
+**狀態**: accepted
+
+**任務 ID**: BE-EVENT-LIFECYCLE-REVISE
+
+**背景**:
+
+在 L2 審查中發現，`main-brain` 的 `wiki_compiler.py` 升格邏輯讀取 `label` 欄位作為事件名稱，
+但 `realtime-news-scout-poc` 輸出的生產資料（`event_state.json`）使用 `display_name` 欄位。
+此不一致導致：
+
+1. **升格檔名錯誤**：生成的 `context/wiki/chains/<名稱>.md` 使用舊版測試欄位名稱，
+   而非實際事件的正式名稱。
+2. **索引失準**：`chain_context_map.json` 的 `label` 欄位記錄非正式名稱，造成語境查詢誤差。
+
+**決策**:
+
+### A. 欄位讀取優先順序
+
+`wiki_compiler.py` 中所有讀取事件名稱的位置，一律透過 `_get_chain_display_name()` 函數，
+依以下優先順序解析：
+
+```
+display_name（生產欄位）> label（測試相容欄位）> chain_id（終極回退）
+```
+
+**理由**：
+- `display_name` 是 realtime-news-scout-poc 新架構的正式欄位，來自 LLM 命名結果。
+- `label` 保留為測試與舊資料的相容欄位，確保升格邏輯在測試環境中仍可運作。
+- `chain_id` 作為最後防線，保證函數永遠不回傳空值。
+
+### B. 跨 Repo 欄位協定
+
+| 欄位名稱       | Repo                        | 用途                           | 必填 |
+|---------------|-----------------------------|--------------------------------|------|
+| `chain_id`    | realtime-news-scout-poc     | 唯一識別符                      | 是   |
+| `display_name`| realtime-news-scout-poc     | 正式事件名稱（LLM 命名）         | 是   |
+| `label`       | realtime-news-scout-poc     | 相容欄位（舊版/測試用）          | 否   |
+| `momentum`    | realtime-news-scout-poc     | 0.0–1.0 浮點數，衰退後更新       | 是   |
+| `phase`       | realtime-news-scout-poc     | Emerging/Growing/Peaking/Fading | 是   |
+| `promoted_to_wiki` | realtime-news-scout-poc | 已升格旗標，升格後設為 True     | 是   |
+
+**後果**:
+
+| 面向     | 影響                                                              |
+|----------|------------------------------------------------------------------|
+| 相容性   | 既有使用 `label` 的測試無需修改，`_get_chain_display_name()` 自動降級 |
+| 正確性   | 生產資料升格時，檔名與索引反映真實事件名稱                          |
+| 可測試性 | 新增 `test_get_chain_display_name_*` 系列測試覆蓋三種欄位情境      |
+
+**受影響的檔案**:
+
+- `main-brain/scripts/wiki_compiler.py`（新增 `_get_chain_display_name()` 函數，修改三處讀取點）
+- `main-brain/tests/test_wiki_compiler.py`（新增 `display_name` 欄位測試）
+- `realtime-news-scout-poc/context/DECISIONS.md`（本文件）
+
+**決策者**: Backend Agent（BE-EVENT-LIFECYCLE-REVISE）
