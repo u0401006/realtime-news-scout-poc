@@ -602,6 +602,8 @@ class V2Scorer:
         # 複寫 V1 的 IP boost
         if "ip_entity_boost" in breakdown:
             score = score - breakdown["ip_entity_boost"] + ip_boost
+            # 移除 V1 的舊主體描述，確保 matched_rules 與 V2 同步
+            matched_rules = [r for r in matched_rules if not r.startswith("IP實體(")]
         else:
             score += ip_boost
         breakdown["ip_boost_v2_1"] = ip_boost
@@ -714,6 +716,8 @@ class V2Scorer:
 
         score *= multiplier
         breakdown["tier_multiplier"] = multiplier
+        if multiplier != 1.0:
+            matched_rules.append(f"KG乘數({multiplier}x, {content_tier.name})")
 
         # Clamp
         total = max(0.0, min(100.0, round(score, 1)))
